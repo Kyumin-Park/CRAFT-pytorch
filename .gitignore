@@ -4,3 +4,6 @@
 *.pth
 result*
 weights*
+figures*
+temp*
+data/*
