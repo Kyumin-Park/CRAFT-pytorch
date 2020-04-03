@@ -8,7 +8,7 @@ def str2bool(v):
     return v.lower() in ("yes", "y", "true", "t", "1")
 
 
-def main():
+def argument_parser():
     parser = argparse.ArgumentParser(description='CRAFT Text Detection Trainer')
     parser.add_argument('--trained_model', default='weights/craft_mlt_25k.pth', type=str, help='pretrained model')
     parser.add_argument('--text_threshold', default=0.7, type=float, help='text confidence threshold')
@@ -26,10 +26,16 @@ def main():
     parser.add_argument('--train', default=False, action='store_true', help='train or test')
     parser.add_argument('--learning_rate', default=0.0001, type=float, help='learning rate')
     parser.add_argument('--max_epoch', default=10, type=int, help='max epoch')
+    parser.add_argument('--batch_size', default=32, type=int, help='training batch size')
     parser.add_argument('--gt', default=False, action='store_true', help='generate ground truth')
 
-    args = parser.parse_args()
+    return parser
 
+
+def main():
+    parser = argument_parser()
+
+    args = parser.parse_args()
     print(args)
 
     if args.gt:
@@ -39,6 +45,27 @@ def main():
             train.train(args)
         else:
             test.test(args)
+
+
+def train():
+    parser = argument_parser()
+    args = parser.parse_args(['--train'])
+    train.train(args)
+
+
+def test(testdir=None):
+    parser = argument_parser()
+    if testdir is None:
+        args = parser.parse_args()
+    else:
+        args = parser.parse_args(['--test_folder', testdir])
+    test.test(args)
+
+
+def ground_truth():
+    parser = argument_parser()
+    args = parser.parse_args(['--gt'])
+    ground_truth.ground_truth(args)
 
 
 if __name__ == '__main__':
