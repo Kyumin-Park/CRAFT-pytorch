@@ -4,19 +4,17 @@ MIT License
 """
 
 # -*- coding: utf-8 -*-
+import torch
+
 import numpy as np
 import cv2
 import math
 
 """ auxilary functions """
-
-
 # unwarp corodinates
 def warpCoord(Minv, pt):
     out = np.matmul(Minv, (pt[0], pt[1], 1))
     return np.array([out[0] / out[2], out[1] / out[2]])
-
-
 """ end of auxilary functions """
 
 
@@ -256,3 +254,16 @@ def adjustResultCoordinates(polys, ratio_w, ratio_h, ratio_net=2):
             if polys[k] is not None:
                 polys[k] *= (ratio_w * ratio_net, ratio_h * ratio_net)
     return polys
+
+
+class CRAFTLoss:
+    def __call__(self, score_text, score_link, y_region, y_link, y_conf):
+        L = torch.sum(y_conf * (torch.pow((score_text - y_region), 2) + torch.pow((score_link - y_link), 2)))
+        return L
+    # def __call__(self, score_text, score_link, label_dir):
+    #     region = torch.tensor(torch.load(label_dir + 'region.pt'), dtype=torch.float64)
+    #     link = torch.tensor(torch.load(label_dir + 'link.pt'), dtype=torch.float64)
+    #     conf = torch.tensor(torch.load(label_dir + 'conf.pt'), dtype=torch.float64)
+    #
+    #     L = torch.sum(conf * (torch.pow((score_text - region), 2) + torch.pow((score_link - link), 2)))
+    #     return L

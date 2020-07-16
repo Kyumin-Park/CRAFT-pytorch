@@ -5,20 +5,23 @@ MIT License
 
 # -*- coding: utf-8 -*-
 import numpy as np
-from skimage import io
+# from skimage import io
 import cv2
 
 
 def loadImage(img_file):
-    img = io.imread(img_file)           # RGB order
+    # img = io.imread(img_file)           # RGB order
+    img = cv2.imread(img_file)
     if img.shape[0] == 2:
         img = img[0]
     if len(img.shape) == 2:
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+    else:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     if img.shape[2] == 4:
         img = img[:, :, :3]
     img = np.array(img)
-
+    assert len(img.shape) == 3 and img.shape[2] == 3
     return img
 
 
@@ -70,6 +73,12 @@ def resize_aspect_ratio(img, square_size, interpolation, mag_ratio=1):
 
     return resized, ratio, size_heatmap
 
+def fill_canvas(img, canvas_size):
+    h, w, c = img.shape
+    canvas = np.zeros((canvas_size, canvas_size, 3), dtype=img.dtype)
+    canvas[:h, :w] = img
+
+    return canvas
 
 def cvt2HeatmapImg(img):
     img = (np.clip(img, 0, 1) * 255).astype(np.uint8)

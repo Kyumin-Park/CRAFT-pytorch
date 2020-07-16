@@ -54,12 +54,61 @@ class CRAFTData(Dataset):
             self.images.append(x)
 
     def __getitem__(self, idx):
-        x = torch.tensor(self.images[idx], requires_grad=True)
-        y_region = torch.tensor(self.scores_region[idx], requires_grad=False)
-        y_link = torch.tensor(self.scores_link[idx], requires_grad=False)
-        y_conf = torch.tensor(self.confmaps[idx], requires_grad=False)
+        x = torch.tensor(self.images[idx])
+        y_region = torch.tensor(self.scores_region[idx])
+        y_link = torch.tensor(self.scores_link[idx])
+        y_conf = torch.tensor(self.confmaps[idx])
 
         return x, y_region, y_link, y_conf
 
     def __len__(self):
         return len(self.images)
+
+
+class CRAFTDataset(Dataset):
+    def __init__(self, args):
+        super(CRAFTDataset, self).__init__()
+        filelist, _, _ = file_utils.list_files('/home/ubuntu/Kyumin/Autotation/data/IC13/images')
+        self.args = args
+        self.labels = []
+        self.images = filelist
+
+        for img_name in filelist:
+            # get datapath
+            label_dir = img_name.replace('Autotation', 'craft').replace('images', 'labels').replace('.jpg', '/')
+            self.labels.append(label_dir)
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, i):
+        # Image loading
+        image = imgproc.loadImage(self.images[i])
+
+        # Preprocess image
+        img_resized, target_ratio, size_heatmap = imgproc.resize_aspect_ratio(image, self.args.canvas_size,
+                                                                              interpolation=cv2.INTER_LINEAR,
+                                                                              mag_ratio=self.args.mag_ratio)
+        img_resized = imgproc.fill_canvas(img_resized, self.args.canvas_size)
+        x = imgproc.normalizeMeanVariance(img_resized)
+        x = torch.tensor(x).permute(2, 0, 1)    # [h, w, c] to [c, h, w]
+
+        # Load labels
+        label_dir = self.labels[i]
+        region = torch.tensor(torch.load(label_dir + 'region.pt'), dtype=torch.float64)
+        link = torch.tensor(torch.load(label_dir + 'link.pt'), dtype=torch.float64)
+        conf = torch.tensor(torch.load(label_dir + 'conf.pt'), dtype=torch.float64)
+
+        return x, region, link, conf
+        # return x, label_dir
+
+
+if __name__ == '__main__':
+    import ocr
+    dataset = CRAFTDataset(ocr.argument_parser().parse_args())
+    for x, r, l, c in dataset:
+        print(x.dtype, r.dtype, l.dtype, c.dtype)
+
+
+
+

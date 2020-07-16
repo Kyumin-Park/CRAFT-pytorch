@@ -10,18 +10,19 @@ from craft import CRAFT
 import test
 import imgproc
 import file_utils
+import craft_utils
 
 
 def generate_gt(net_pretrained, image, boxes, labels, args):
-    region_gt = link_gt = np.zeros((image.shape[0], image.shape[1]), dtype='uint8')
-    conf_map = np.zeros((image.shape[0], image.shape[1]), dtype='float32')
+    region_gt = link_gt = np.zeros((args.canvas_size // 2, args.canvas_size // 2), dtype=np.float32)
+    conf_map = np.zeros((args.canvas_size // 2, args.canvas_size // 2), dtype=np.float32)
     gaussian = generate_gaussian(500)
     for i, box in enumerate(boxes):
         # Crop bounding box region
         warped = transform_image(image, box)
 
         # Apply pretrained network
-        _, _, score_text, _ = test.test_net(net_pretrained, warped, args)
+        score_text, target_ratio = gt_net(net_pretrained, warped, args)
 
         # render results (optional)
         render_img = imgproc.cvt2HeatmapImg(score_text.copy())
@@ -30,8 +31,7 @@ def generate_gt(net_pretrained, image, boxes, labels, args):
 
         box_chr = chr_annotation(watershed)
         wordlen = len(labels[i])
-
-        sconf = float(wordlen - min(wordlen, abs(wordlen - len(box_chr)))) / wordlen
+        sconf = float(wordlen - min(wordlen, abs(wordlen - len(box_chr)))) / float(wordlen)
         h, w = np.shape(score_text)
         if sconf < 0.5:
             box_chr = []
@@ -54,11 +54,34 @@ def generate_gt(net_pretrained, image, boxes, labels, args):
         for abox in box_aff:
             link_box = restore(gaussian, link_box, abox)
 
-        region_gt = restore(region_box, region_gt, box)
-        link_gt = restore(link_box, link_gt, box)
-        conf_map = restore(conf_box, conf_map, box)
+        box_adj = craft_utils.adjustResultCoordinates([np.float64(box)], target_ratio, target_ratio, 0.5)[0]
+        region_gt = restore(region_box, region_gt, box_adj)
+        link_gt = restore(link_box, link_gt, box_adj)
+        conf_map = restore(conf_box, conf_map, box_adj)
+    print(region_gt.shape, link_gt.shape, conf_map.shape)
 
     return region_gt, link_gt, conf_map
+
+
+def gt_net(net, image, args):
+    # resize
+    img_resized, target_ratio, size_heatmap = imgproc.resize_aspect_ratio(image, args.canvas_size,
+                                                                          interpolation=cv2.INTER_LINEAR,
+                                                                          mag_ratio=args.mag_ratio)
+    # preprocessing
+    x = imgproc.normalizeMeanVariance(img_resized)
+    x = torch.tensor(x).permute(2, 0, 1).unsqueeze(0)  # [h, w, c] to [b, c, h, w]
+    if args.cuda:
+        x = x.cuda()
+
+    # forward pass
+    with torch.no_grad():
+        y, feature = net(x)
+
+    # make score and link map
+    score_text = y[0, :, :, 0].cpu().data.numpy()
+
+    return score_text, target_ratio
 
 
 def transform_image(image, pts):
@@ -108,6 +131,10 @@ def watershed_labeling(image):
     :param image: score heatmap
     :return: watershed-applied image
     """
+    image_enhanced = np.float64(image)
+    image_enhanced *= 2
+    image_enhanced = np.min([image_enhanced, np.ones_like(image_enhanced) * 255], axis=0).astype(np.uint8)
+
     # Convert to grayscale
     gray = heatmap2score(image)
 
@@ -119,11 +146,11 @@ def watershed_labeling(image):
     opening = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=2)
 
     # Dilate: get background
-    sure_bg = cv2.dilate(opening, kernel, iterations=3)
+    sure_bg = cv2.dilate(opening, kernel, iterations=7)
 
     # Apply distance transform to get sure fg
     dist_transform = cv2.distanceTransform(opening, cv2.DIST_L2, 5)
-    ret, sure_fg = cv2.threshold(dist_transform, 0.5 * dist_transform.max(), 255, 0)
+    ret, sure_fg = cv2.threshold(dist_transform, 0.1 * dist_transform.max(), 255, 0)
     sure_fg = np.uint8(sure_fg)
 
     # Subtract foreground from background
@@ -135,26 +162,29 @@ def watershed_labeling(image):
     markers[unknown == 255] = 0
 
     # Apply watershed
-    markers = cv2.watershed(image, markers)
+    markers = cv2.watershed(image_enhanced, markers)
     markers = np.abs(markers) - 1
 
     if np.max(markers) == 0:
         return markers.astype('uint8')
 
     markers_gray = np.multiply(markers, (255 // np.max(markers))).astype('uint8')
+
     return markers_gray
 
 
-def chr_annotation(image):
-    _, contours, _ = cv2.findContours(image, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+def chr_annotation(image, pad=0.2):
+    contours, _ = cv2.findContours(image, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    contours.sort(key=lambda x: cv2.arcLength(x, closed=True), reverse=True)
 
     boxes = []
     for cnt in contours:
         x, y, w, h = cv2.boundingRect(cnt)
-        box = np.array([[x, y], [x + w, y], [x + w, y + h], [x, y + h]])
+        box = np.array([[x - pad * w, y - pad * h], [x + (1 + pad) * w, y - pad * h],
+                        [x + (1 + pad) * w, y + (1 + pad) * h], [x - pad * w, y + (1 + pad) * h]])
         boxes.append(box)
 
-    return boxes
+    return list(sorted(boxes, key=lambda x: x[0][0]))
 
 
 def get_affinity(box1, box2):
@@ -184,8 +214,8 @@ def restore(image, dst, pts):
 
 
 def generate_gaussian(size):
-    X = np.linspace(-1.35, 1.35, size)
-    Y = np.linspace(-1.35, 1.35, size)
+    X = np.linspace(-2.4, 2.4, size)
+    Y = np.linspace(-2.4, 2.4, size)
     X, Y = np.meshgrid(X, Y)
 
     pos = np.empty(X.shape + (2,))
@@ -215,25 +245,34 @@ def ground_truth(args):
 
     net.eval()
 
-    filelist, _, _ = file_utils.list_files('./data/train/data/IC15')
+    filelist, _, _ = file_utils.list_files('/home/ubuntu/Kyumin/Autotation/data/IC13/images')
 
-    for filename in filelist:
+    for img_name in filelist:
         # get datapath
-        dataset = os.path.dirname(filename).split(os.sep)[-1]
-        filenum = os.path.splitext(os.path.basename(filename))[0]
-        label_dir = './data/train/ground_truth/{}/gt_{}/'.format(dataset, filenum)
-        label_text = './data/train/ground_truth/{}/gt_{}.txt'.format(dataset, filenum)
+        if 'train' in img_name:
+            label_name = img_name.replace('images/train/', 'labels/train/gt_').replace('jpg', 'txt')
+        else:
+            label_name = img_name.replace('images/test/', 'labels/test/gt_').replace('jpg', 'txt')
+        label_dir = img_name.replace('Autotation', 'craft').replace('images', 'labels').replace('.jpg', '/')
 
-        if not os.path.exists(label_dir):
-            os.mkdir(label_dir)
+        os.makedirs(label_dir, exist_ok=True)
 
-        image = imgproc.loadImage(filename)
+        image = imgproc.loadImage(img_name)
 
         gt_boxes = []
         gt_words = []
-        with open(label_text, 'r', encoding='utf-8-sig') as f:
+        with open(label_name, 'r', encoding='utf-8-sig') as f:
             lines = f.readlines()
-            for line in lines:
+        for line in lines:
+            if 'IC13' in img_name:  # IC13
+                gt_box, gt_word, _ = line.split('"')
+                if 'train' in img_name:
+                    x1, y1, x2, y2 = [int(a) for a in gt_box.strip().split(' ')]
+                else:
+                    x1, y1, x2, y2 = [int(a.strip()) for a in gt_box.split(',') if a.strip().isdigit()]
+                gt_boxes.append(np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]]))
+                gt_words.append(gt_word)
+            elif 'IC15' in img_name:
                 gt_data = line.strip().split(',')
                 gt_box = gt_data[:8]
                 if len(gt_data) > 9:
@@ -252,6 +291,27 @@ def ground_truth(args):
         torch.save(conf_map, label_dir + 'conf.pt')
 
 
+if __name__ == '__main__':
+    import ocr
+    score_region = torch.load('/home/ubuntu/Kyumin/craft/data/IC13/labels/train/100/region.pt')
+    score_link = torch.load('/home/ubuntu/Kyumin/craft/data/IC13/labels/train/100/link.pt')
+    conf_map = torch.load('/home/ubuntu/Kyumin/craft/data/IC13/labels/train/100/conf.pt')
+    image = imgproc.loadImage('/home/ubuntu/Kyumin/Autotation/data/IC13/images/train/100.jpg')
+    print(score_region.shape, score_link.shape, conf_map.shape)
+    # cv2.imshow('original', image)
+    cv2.imshow('region', imgproc.cvt2HeatmapImg(score_region))
+    cv2.imshow('link', score_link)
+    cv2.imshow('conf', conf_map)
 
+    net = CRAFT().cuda()
+    net.load_state_dict(test.copyStateDict(torch.load('weights/craft_mlt_25k.pth')))
+
+    net.eval()
+    _, _, ref_text, ref_link, _ = test.test_net(net, image, ocr.argument_parser().parse_args())
+    cv2.imshow('ref text', imgproc.cvt2HeatmapImg(ref_text))
+    cv2.imshow('ref link', ref_link)
+
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
 

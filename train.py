@@ -7,7 +7,6 @@ import glob
 import torch
 import torch.nn as nn
 import torch.backends.cudnn as cudnn
-from torch.autograd import Variable
 import torch.optim as optim
 from torch import Tensor
 
@@ -21,50 +20,14 @@ import file_utils
 import json
 import zipfile
 import test
+from tqdm import tqdm
 
 from craft import CRAFT
 
-from dataset import CRAFTData
+from dataset import CRAFTDataset
 from torch.utils.data import DataLoader
 
 from collections import OrderedDict
-
-
-def train_net(net, image, box_gt, labels, args, refine_net=None):
-    gt_region, gt_link, conf_map = generate_gt(net, image, box_gt, labels, args)
-
-    # resize
-    img_resized, target_ratio, size_heatmap = imgproc.resize_aspect_ratio(image, args.canvas_size,
-                                                                          interpolation=cv2.INTER_LINEAR,
-                                                                          mag_ratio=args.mag_ratio)
-    # preprocessing
-    x = imgproc.normalizeMeanVariance(img_resized)
-    x = torch.as_tensor(x).requires_grad_(False)
-    x = x.permute(2, 0, 1)  # [h, w, c] to [c, h, w]
-    x = x.unsqueeze(0)  # [c, h, w] to [b, c, h, w]
-    x = x.requires_grad_(True)
-    if args.cuda:
-        x = x.cuda()
-
-    # forward pass
-    y, feature = net(x)
-
-    # make score and link map
-    score_text = y[0, :, :, 0]
-    score_link = y[0, :, :, 1]
-
-    # resize ground truth
-    gt_region = cv2.resize(gt_region, dsize=score_text.shape,  interpolation=cv2.INTER_LINEAR)
-    gt_link = cv2.resize(gt_link, dsize=score_text.shape, interpolation=cv2.INTER_LINEAR)
-    conf_map = cv2.resize(conf_map, dsize=score_text.shape, interpolation=cv2.INTER_LINEAR)
-
-    gt_region = torch.tensor(gt_region, requires_grad=False)
-    gt_link = torch.tensor(gt_link, requires_grad=False)
-    conf_map = torch.tensor(conf_map, requires_grad=False)
-
-    L = torch.sum(conf_map * (torch.pow((score_text - gt_region), 2) + torch.pow((score_link - gt_link), 2)))
-
-    return L
 
 
 def train(args):
@@ -102,16 +65,21 @@ def train(args):
     #
     #     args.poly = True
 
+    criterion = craft_utils.CRAFTLoss()
     optimizer = optim.Adam(net.parameters(), args.learning_rate)
-    train_data = CRAFTData(args)
+    train_data = CRAFTDataset(args)
     dataloader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True)
 
+    pbar = tqdm(enumerate(dataloader), total=len(dataloader))
     for epoch in range(args.max_epoch):
         running_loss = 0.0
-        for i, data in enumerate(dataloader):
-
+        for i, data in pbar:
             x, y_region, y_link, y_conf = data
-
+            x = x.cuda()
+            y_region = y_region.cuda()
+            y_link = y_link.cuda()
+            y_conf = y_conf.cuda()
+            # x, label_dir = data
             optimizer.zero_grad()
 
             y, feature = net(x)
@@ -119,12 +87,13 @@ def train(args):
             score_text = y[:, :, :, 0]
             score_link = y[:, :, :, 1]
 
-            L = torch.sum(y_conf * (torch.pow((score_text - y_region), 2) + torch.pow((score_link - y_link), 2)))
+            L = criterion(score_text, score_link, y_region, y_link, y_conf)
+            # L = criterion(score_text, score_link, label_dir)
 
             L.backward()
             optimizer.step()
 
-            running_loss += L.item()
+            running_loss += L.data.item()
             if i % 2000 == 1999:
                 print('[%d, %5d] loss: %.3f' %
                       (epoch + 1, i + 1, running_loss / 2000))

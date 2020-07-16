@@ -25,11 +25,33 @@ def argument_parser():
                         help='pretrained refiner model')
     parser.add_argument('--train', default=False, action='store_true', help='train or test')
     parser.add_argument('--learning_rate', default=0.0001, type=float, help='learning rate')
-    parser.add_argument('--max_epoch', default=10, type=int, help='max epoch')
-    parser.add_argument('--batch_size', default=32, type=int, help='training batch size')
+    parser.add_argument('--max_epoch', default=3, type=int, help='max epoch')
+    parser.add_argument('--batch_size', default=2, type=int, help='training batch size')
+    parser.add_argument('--dataset', default='IC13', type=str, help='Training dataset')
     parser.add_argument('--gt', default=False, action='store_true', help='generate ground truth')
 
     return parser
+
+
+# def train_craft():
+#     parser = argument_parser()
+#     args = parser.parse_args(['--train'])
+#     train.train(args)
+#
+#
+# def test_craft(testdir=None):
+#     parser = argument_parser()
+#     if testdir is None:
+#         args = parser.parse_args()
+#     else:
+#         args = parser.parse_args(['--test_folder', testdir])
+#     test.test(args)
+#
+#
+# def ground_truth_craft():
+#     parser = argument_parser()
+#     args = parser.parse_args(['--gt'])
+#     ground_truth.ground_truth(args)
 
 
 def main():
@@ -45,27 +67,6 @@ def main():
             train.train(args)
         else:
             test.test(args)
-
-
-def train():
-    parser = argument_parser()
-    args = parser.parse_args(['--train'])
-    train.train(args)
-
-
-def test(testdir=None):
-    parser = argument_parser()
-    if testdir is None:
-        args = parser.parse_args()
-    else:
-        args = parser.parse_args(['--test_folder', testdir])
-    test.test(args)
-
-
-def ground_truth():
-    parser = argument_parser()
-    args = parser.parse_args(['--gt'])
-    ground_truth.ground_truth(args)
 
 
 if __name__ == '__main__':

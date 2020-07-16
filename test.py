@@ -4,20 +4,16 @@ MIT License
 """
 
 # -*- coding: utf-8 -*-
-import sys
 import os
 import time
-import argparse
 
 import torch
 import torch.nn as nn
 import torch.backends.cudnn as cudnn
-from torch.autograd import Variable
 
 from PIL import Image
 
 import cv2
-from skimage import io
 import numpy as np
 import craft_utils
 import imgproc
@@ -53,8 +49,7 @@ def test_net(net, image, args, refine_net=None):
 
     # preprocessing
     x = imgproc.normalizeMeanVariance(img_resized)
-    x = torch.from_numpy(x).permute(2, 0, 1)  # [h, w, c] to [c, h, w]
-    x = Variable(x.unsqueeze(0))  # [c, h, w] to [b, c, h, w]
+    x = torch.tensor(x).permute(2, 0, 1).unsqueeze(0)  # [h, w, c] to [b, c, h, w]
     if args.cuda:
         x = x.cuda()
 
