@@ -29,6 +29,7 @@ def argument_parser():
     parser.add_argument('--batch_size', default=2, type=int, help='training batch size')
     parser.add_argument('--dataset', default='IC13', type=str, help='Training dataset')
     parser.add_argument('--gt', default=False, action='store_true', help='generate ground truth')
+    parser.add_argument('--weight', default='weights/craft_mlt_own.pth', type=str, help='weight save path')
 
     return parser
 
@@ -45,7 +46,7 @@ def argument_parser():
 #         args = parser.parse_args()
 #     else:
 #         args = parser.parse_args(['--test_folder', testdir])
-#     test.test(args)
+#     test.test(args)--lea
 #
 #
 # def ground_truth_craft():

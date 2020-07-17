@@ -69,9 +69,10 @@ def train(args):
     optimizer = optim.Adam(net.parameters(), args.learning_rate)
     train_data = CRAFTDataset(args)
     dataloader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True)
+    t0 = time.time()
 
-    pbar = tqdm(enumerate(dataloader), total=len(dataloader))
     for epoch in range(args.max_epoch):
+        pbar = tqdm(enumerate(dataloader), total=len(dataloader), desc=f'Epoch {epoch}')
         running_loss = 0.0
         for i, data in pbar:
             x, y_region, y_link, y_conf = data
@@ -79,7 +80,6 @@ def train(args):
             y_region = y_region.cuda()
             y_link = y_link.cuda()
             y_conf = y_conf.cuda()
-            # x, label_dir = data
             optimizer.zero_grad()
 
             y, feature = net(x)
@@ -88,20 +88,17 @@ def train(args):
             score_link = y[:, :, :, 1]
 
             L = criterion(score_text, score_link, y_region, y_link, y_conf)
-            # L = criterion(score_text, score_link, label_dir)
 
             L.backward()
             optimizer.step()
 
             running_loss += L.data.item()
-            if i % 2000 == 1999:
-                print('[%d, %5d] loss: %.3f' %
-                      (epoch + 1, i + 1, running_loss / 2000))
+            if i % 2000 == 1999 or i == len(dataloader) - 1:
+                pbar.set_postfix_str('[%d, %5d] loss: %.3f' %
+                                     (epoch + 1, i + 1, running_loss / min(i + 1, 2000)))
                 running_loss = 0.0
 
-    print('training finished')
+    # Save trained model
+    torch.save(net.state_dict(), args.weight)
 
-
-
-
-
+    print(f'training finished\n {time.time() - t0} spent for {args.max_epoch} epochs')
